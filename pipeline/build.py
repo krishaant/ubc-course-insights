@@ -47,8 +47,17 @@ def build_prof_resolution() -> pd.DataFrame:
     crosswalk = pd.read_csv(CLEAN_DIR / "prof_crosswalk.csv")
     master_source = crosswalk[crosswalk["source"].isin(["grades", "sections"])]
 
+    # Several distinct unparseable names ("TBA", "Staff", ". Manav", ...)
+    # all collapse to match_key=NaN. Without dropping them here first,
+    # drop_duplicates would keep exactly one of them and give it a prof_id
+    # -- which every null/placeholder-instructor row in course_terms would
+    # then incorrectly inherit via the merge (confirmed: this previously
+    # made 100% of course_terms rows "resolve" to one shared bogus
+    # "local:nan" identity, including the ~80k genuinely null-instructor
+    # rows that should have no prof_id at all).
     resolution = (
         master_source[["match_key", "legacy_id", "match_label"]]
+        .dropna(subset=["match_key"])
         .drop_duplicates(subset="match_key")
     )
     resolution["prof_id"] = [
@@ -70,7 +79,7 @@ def build_prof_resolution() -> pd.DataFrame:
 
 
 def build_course_terms(resolution: pd.DataFrame) -> pd.DataFrame:
-    df = pd.read_csv(CLEAN_DIR / "grade_sections.csv")
+    df = pd.read_csv(CLEAN_DIR / "grade_sections.csv", low_memory=False)
     df["match_key"] = df["instructor"].apply(match_key_from_fullname)
     df = df.merge(resolution, on="match_key", how="left")
     out = df[[
@@ -203,13 +212,14 @@ def build_data_sources() -> pd.DataFrame:
     import datetime as dt
 
     def raw_rows(path):
-        return len(pd.read_csv(path)) if Path(path).exists() else 0
+        return len(pd.read_csv(path, low_memory=False)) if Path(path).exists() else 0
 
     return pd.DataFrame([
         {"source": "RateMyProfessors", "last_pulled": dt.date(2026, 10, 7),
          "raw_rows": raw_rows(CLEAN_DIR / "rmp_professors.csv"), "notes": "professor gist only, no reviews yet"},
-        {"source": "UBC grades (DonneyF/ubc-pair-grade-data)", "last_pulled": dt.date(2026, 10, 7),
-         "raw_rows": raw_rows(CLEAN_DIR / "grade_sections.csv"), "notes": "10 terms, 2021S-2025W"},
+        {"source": "UBC grades (DonneyF/ubc-pair-grade-data)", "last_pulled": dt.date(2026, 10, 8),
+         "raw_rows": raw_rows(CLEAN_DIR / "grade_sections.csv"),
+         "notes": "1996S-2025W (pair-reports to 2013, tableau v1 2014-2020, tableau v2 2021+)"},
         {"source": "UBC course schedule", "last_pulled": dt.date(2026, 10, 8),
          "raw_rows": raw_rows(CLEAN_DIR / "upcoming_sections.csv"), "notes": "terms 1453-1454 (2026-27 W1/W2)"},
         {"source": "SOFI salary PDFs", "last_pulled": dt.date(2026, 10, 7),

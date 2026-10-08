@@ -39,10 +39,28 @@ def match_key_from_parts(first_name, last_name) -> str | None:
     return f"{last}_{first}"
 
 
+NAME_PLACEHOLDERS = {"tba", "staff", "sessional lecturer", "instructor", "n/a", "none"}
+
+
 def match_key_from_fullname(full_name) -> str | None:
+    """Handles both naming conventions found in the grades data:
+    'First Last' (tableau_v1/v2, no comma) and 'Last, First' (pair-reports,
+    the dominant but not universal convention in that era -- some rows are
+    plain 'First Last' there too, confirmed against live data). Also filters
+    known placeholder values ('TBA', 'Staff', etc.) rather than treating them
+    as real names.
+    """
     if not isinstance(full_name, str) or not full_name.strip():
         return None
-    parts = full_name.strip().split()
+    name = full_name.strip()
+    if name.lower() in NAME_PLACEHOLDERS:
+        return None
+
+    if "," in name:
+        last, _, first = name.partition(",")
+        return match_key_from_parts(first, last)
+
+    parts = name.split()
     if len(parts) < 2:
         return None
     return match_key_from_parts(parts[0], parts[-1])
@@ -58,7 +76,7 @@ def load_overrides() -> dict[str, int]:
 
 def build_crosswalk() -> pd.DataFrame:
     rmp = pd.read_csv(CLEAN_DIR / "rmp_professors.csv")
-    grades = pd.read_csv(CLEAN_DIR / "grade_sections.csv")
+    grades = pd.read_csv(CLEAN_DIR / "grade_sections.csv", low_memory=False)
     sections = pd.read_csv(CLEAN_DIR / "upcoming_sections.csv")
     salaries = pd.read_csv(CLEAN_DIR / "salaries.csv")
 

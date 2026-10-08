@@ -35,30 +35,55 @@ def split_instructors(raw: str, sep: str) -> list[str]:
 # Grades
 # ---------------------------------------------------------------------------
 
-def clean_grades(raw_root: str) -> pd.DataFrame:
-    files = sorted(glob.glob(f"{raw_root}/tableau-dashboard-v2/UBCV/*/*.csv"))
-    if not files:
-        raise RuntimeError(f"No grade CSVs found under {raw_root}")
+# Era precedence where terms overlap: newer methodology wins. pair-reports
+# covers 1996-2018, tableau_v1 covers 2014-2021, tableau_v2 covers 2021-2025.
+# Keep pair-reports only where v1 doesn't cover it, and v1 only where v2
+# doesn't cover it.
+ERA_YEAR_CUTOFFS = {
+    "pair_reports": lambda year: year <= 2013,
+    "tableau_v1": lambda year: year <= 2020,
+    "tableau_v2": lambda year: True,
+}
 
-    frames = [pd.read_csv(f) for f in files]
-    df = pd.concat(frames, ignore_index=True)
+ERA_SPARSE_PATHS = {
+    "pair_reports": "pair-reports/UBC",
+    "tableau_v1": "tableau-dashboard/UBCV",
+    "tableau_v2": "tableau-dashboard-v2/UBCV",
+}
+
+
+def clean_grades(raw_root: str) -> pd.DataFrame:
+    era_frames = []
+    for era, sparse_path in ERA_SPARSE_PATHS.items():
+        files = sorted(glob.glob(f"{raw_root}/{sparse_path}/*/*.csv"))
+        if not files:
+            raise RuntimeError(f"No grade CSVs found under {raw_root}/{sparse_path}")
+        df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+        df = df[df["Year"].apply(ERA_YEAR_CUTOFFS[era])].copy()
+        df["era"] = era
+        if "Enrolled" in df.columns:
+            df = df.rename(columns={"Enrolled": "Reported"})
+        era_frames.append(df)
+        print(f"grades/{era}: {len(df)} rows kept after era-precedence cutoff")
+
+    df = pd.concat(era_frames, ignore_index=True)
 
     before = len(df)
-    df = df[df["Detail"].astype(str) != "OVERALL"].copy()
-    df = df[df["Section"].astype(str) != "OVERALL"].copy()
+    detail = df["Detail"].astype(str).str.strip()
+    section = df["Section"].astype(str).str.strip()
+    df = df[(detail != "OVERALL") & (section != "OVERALL")].copy()
     dropped_overall = before - len(df)
 
     df["course_key"] = [course_key(s, c) for s, c in zip(df["Subject"], df["Course"])]
     df["term"] = df["Year"].astype(str) + df["Session"].astype(str)
 
-    rows = []
-    for _, row in df.iterrows():
-        instructors = split_instructors(row["Professor"], sep=";")
-        for instructor in instructors:
-            r = row.to_dict()
-            r["instructor"] = instructor
-            rows.append(r)
-    out = pd.DataFrame(rows)
+    # Vectorized instructor split (';'-joined across all three eras,
+    # confirmed) -- iterrows was too slow once pair-reports' ~300k rows
+    # joined the mix.
+    df["instructor"] = df["Professor"].apply(
+        lambda raw: split_instructors(raw, sep=";")
+    )
+    out = df.explode("instructor", ignore_index=True)
 
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
     out_path = CLEAN_DIR / "grade_sections.csv"
@@ -66,6 +91,7 @@ def clean_grades(raw_root: str) -> pd.DataFrame:
 
     print(f"grades: {before} raw rows -> {len(out)} clean rows "
           f"({dropped_overall} OVERALL rows dropped, expanded for multi-instructor sections)")
+    print(f"  era breakdown: {df['era'].value_counts().to_dict()}")
     print(f"  saved to {out_path}")
     return out
 
@@ -220,7 +246,7 @@ def clean_rmp_professors(raw_path: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    clean_grades("data/raw/grades/2026-10-07/ubc-pair-grade-data")
+    clean_grades("data/raw/grades/2026-10-08/ubc-pair-grade-data")
     clean_salaries("data/raw/salaries")
     clean_rmp_professors("data/raw/rmp/2026-10-07/professors.json")
 
