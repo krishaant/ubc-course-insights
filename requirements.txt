@@ -1,0 +1,4 @@
+RateMyProfessor-Database-APIs
+requests
+tqdm
+lxml
