@@ -108,9 +108,18 @@ def get_course_summary(con, course_key: str) -> pd.Series | None:
 
 
 def get_course_trend_by_term(con, course_key: str) -> pd.DataFrame:
+    # Dedupe to one row per section first -- course_terms has one row per
+    # (section, instructor), so a co-taught section would otherwise count
+    # toward the term average once per instructor (confirmed: ~18% of
+    # sections have 2+ instructors). Matches the same fix in
+    # pipeline/build.py's course_summary.
     return con.execute(
+        "WITH one_row_per_section AS ("
+        "  SELECT term, section, ANY_VALUE(avg) AS avg, ANY_VALUE(reported) AS reported "
+        "  FROM course_terms WHERE course_key = ? GROUP BY term, section"
+        ") "
         "SELECT term, SUM(reported * avg) / SUM(reported) AS avg, SUM(reported) AS reported "
-        "FROM course_terms WHERE course_key = ? GROUP BY term ORDER BY term",
+        "FROM one_row_per_section GROUP BY term ORDER BY term",
         [course_key],
     ).fetchdf()
 
@@ -141,13 +150,24 @@ GRADE_BUCKET_COLS = [
 def get_grade_distribution(con, course_key: str, prof_id: str | None = None) -> pd.Series:
     cols = ", ".join(f'SUM("{c}") AS "{c}"' for c in GRADE_BUCKET_COLS)
     if prof_id:
+        # One instructor's own rows -- correct to sum as-is, even for a
+        # section they co-taught (that's genuinely their contribution).
         df = con.execute(
             f"SELECT {cols} FROM course_terms WHERE course_key = ? AND prof_id = ?",
             [course_key, prof_id],
         ).fetchdf()
     else:
+        # All instructors combined -- dedupe to one row per section first,
+        # or a co-taught section's students get counted once per
+        # instructor (same bug as get_course_trend_by_term).
+        any_cols = ", ".join(f'ANY_VALUE("{c}") AS "{c}"' for c in GRADE_BUCKET_COLS)
+        sum_cols = ", ".join(f'SUM("{c}") AS "{c}"' for c in GRADE_BUCKET_COLS)
         df = con.execute(
-            f"SELECT {cols} FROM course_terms WHERE course_key = ?", [course_key]
+            f"WITH one_row_per_section AS ("
+            f"  SELECT term, section, {any_cols} FROM course_terms "
+            f"  WHERE course_key = ? GROUP BY term, section"
+            f") SELECT {sum_cols} FROM one_row_per_section",
+            [course_key],
         ).fetchdf()
     return df.iloc[0] if not df.empty else pd.Series({c: 0 for c in GRADE_BUCKET_COLS})
 

@@ -52,14 +52,27 @@ def format_days(raw) -> str:
 st.title(selected)
 st.caption(summary["course_title"] or "")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Overall average", f"{summary['overall_avg']:.1f}" if summary["overall_avg"] == summary["overall_avg"] else "—")
-col2.metric("Terms offered", int(summary["num_terms_offered"]))
-col3.metric("Sections (all time)", int(summary["num_sections_total"]))
+def fmt(val, decimals=1):
+    return f"{val:.{decimals}f}" if val == val else "—"  # val == val is False for NaN
+
+
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Overall avg", fmt(summary["overall_avg"]))
+col2.metric("Max avg", fmt(summary["max_section_avg"]))
+col3.metric("Min avg", fmt(summary["min_section_avg"]))
+col4.metric("Terms", int(summary["num_terms_offered"]))
+col5.metric("Sections", int(summary["num_sections_total"]))
 
 trend = data.get_course_trend_by_term(con, selected)
 if not trend.empty:
-    fig = px.line(trend, x="term", y="avg", markers=True, title="Average grade by term")
+    trend = trend.sort_values("term")
+    range_choice = st.radio(
+        "Chart range", ["Past 5 years", "All years"], horizontal=True, label_visibility="collapsed",
+    )
+    # Terms run ~2/year (W + S), so the last 10 is a close enough proxy for
+    # "5 years" -- matches what ubcgrades.com itself shows.
+    chart_df = trend.tail(10) if range_choice == "Past 5 years" else trend
+    fig = px.line(chart_df, x="term", y="avg", markers=True, title="Average grade by term")
     st.plotly_chart(fig, use_container_width=True)
 
 tab_now, tab_history, tab_grades, tab_profs = st.tabs(["Now", "History", "Grades", "Professors"])

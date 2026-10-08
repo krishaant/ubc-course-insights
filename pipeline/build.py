@@ -100,19 +100,30 @@ def build_course_summary(course_terms: pd.DataFrame) -> pd.DataFrame:
         w = g["reported"]
         return (g[col] * w).sum() / w.sum() if w.sum() > 0 else float("nan")
 
+    # course_terms has one row per (section, instructor) -- a co-taught
+    # section appears once per instructor (confirmed: ~18% of sections have
+    # 2+ instructors, one as high as 65). That's correct for professor-level
+    # stats (each instructor should get credit) but wrong here: a
+    # course-level average must count each physical section once, not once
+    # per instructor, or co-taught sections silently dominate the average.
+    one_row_per_section = course_terms.drop_duplicates(subset=["course_key", "term", "section"])
+
     rows = []
-    for course_key, g in course_terms.groupby("course_key"):
+    for course_key, g in one_row_per_section.groupby("course_key"):
         rows.append({
             "course_key": course_key,
             "course_title": g["course_title"].mode().iloc[0] if not g["course_title"].mode().empty else None,
             "overall_avg": weighted_avg(g, "avg"),
+            "max_section_avg": g["avg"].max(),
+            "min_section_avg": g["avg"].min(),
             "num_terms_offered": g["term"].nunique(),
             "num_sections_total": len(g),
             "first_term": sorted(g["term"].unique())[0],
             "last_term": sorted(g["term"].unique())[-1],
         })
     out = pd.DataFrame(rows)
-    print(f"course_summary: {len(out)} rows")
+    print(f"course_summary: {len(out)} rows (deduped {len(course_terms) - len(one_row_per_section)} "
+          f"co-instructor rows before aggregating, so course-level stats don't double-count them)")
     return out
 
 
