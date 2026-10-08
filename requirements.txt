@@ -2,3 +2,5 @@ RateMyProfessor-Database-APIs
 requests
 tqdm
 lxml
+pandas
+pdfplumber
