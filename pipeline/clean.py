@@ -199,11 +199,19 @@ def clean_rmp_professors(raw_path: str) -> pd.DataFrame:
         "avg_rating", "avg_difficulty", "num_ratings", "would_take_again_percent",
     ]].copy()
 
+    before_dedup = len(out)
+    # Cursor-based pagination can return the same professor twice across
+    # page boundaries (confirmed: 18 professors / 36 rows duplicated in the
+    # raw pull, identical on every field). Keep one row per legacy_id.
+    out = out.drop_duplicates(subset="legacy_id", keep="first")
+    duped = before_dedup - len(out)
+
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
     out_path = CLEAN_DIR / "rmp_professors.csv"
     out.to_csv(out_path, index=False)
 
-    print(f"rmp professors: {len(out)} clean rows -> {out_path}")
+    print(f"rmp professors: {before_dedup} raw rows -> {len(out)} clean rows "
+          f"({duped} duplicate-legacy_id rows dropped) -> {out_path}")
     print("  NOTE: this is professor-gist data only (ratings aggregate). No "
           "review-level rows exist yet — fetch_a_professor() hasn't been "
           "called per-professor, so there's no reviews.csv / review text / "
