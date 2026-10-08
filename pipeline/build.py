@@ -45,15 +45,28 @@ def build_prof_resolution() -> pd.DataFrame:
     above the SOFI disclosure threshold.
     """
     crosswalk = pd.read_csv(CLEAN_DIR / "prof_crosswalk.csv")
+    master_source = crosswalk[crosswalk["source"].isin(["grades", "sections"])]
+
     resolution = (
-        crosswalk[crosswalk["source"].isin(["grades", "sections"])]
-        [["match_key", "legacy_id", "match_label"]]
+        master_source[["match_key", "legacy_id", "match_label"]]
         .drop_duplicates(subset="match_key")
     )
     resolution["prof_id"] = [
         _prof_id(lid, mk) for lid, mk in zip(resolution["legacy_id"], resolution["match_key"])
     ]
-    return resolution[["match_key", "prof_id", "legacy_id", "match_label"]]
+
+    # A representative raw name per match_key, for professors with no RMP
+    # match -- prof_summary otherwise has no name at all for them (RMP is
+    # currently the only source first_name/last_name come from), which
+    # breaks both display and name search for ~70% of no_rmp professors.
+    raw_name = (
+        master_source.groupby("match_key")["raw_name"]
+        .agg(lambda names: sorted(names)[0])
+        .rename("representative_raw_name")
+    )
+    resolution = resolution.merge(raw_name, on="match_key", how="left")
+
+    return resolution[["match_key", "prof_id", "legacy_id", "match_label", "representative_raw_name"]]
 
 
 def build_course_terms(resolution: pd.DataFrame) -> pd.DataFrame:
@@ -131,7 +144,22 @@ def build_prof_master(resolution: pd.DataFrame) -> pd.DataFrame:
         left_on="prof_id", right_on="prof_id_rmp", how="left",
     ).drop(columns=["prof_id_rmp"])
 
-    print(f"prof_master: {len(out)} rows ({out['first_name'].notna().sum()} with RMP data attached)")
+    had_rmp_name = out["first_name"].notna().sum()
+
+    # Fall back to the representative raw name (from grades/sections) for
+    # professors with no RMP match, split the same way match keys are built
+    # (first word = first name, last word = last name) so it's at least
+    # consistent with how the rest of the pipeline treats names.
+    needs_fallback = out["first_name"].isna() & out["representative_raw_name"].notna()
+    fallback_parts = out.loc[needs_fallback, "representative_raw_name"].str.split()
+    out.loc[needs_fallback, "first_name"] = fallback_parts.str[0]
+    out.loc[needs_fallback, "last_name"] = fallback_parts.str[-1]
+
+    out = out.drop(columns=["representative_raw_name"])
+
+    print(f"prof_master: {len(out)} rows ({had_rmp_name} with RMP name, "
+          f"{needs_fallback.sum()} using a grades/sections fallback name, "
+          f"{out['first_name'].isna().sum()} with no name at all)")
     return out
 
 
@@ -166,6 +194,29 @@ def build_salaries(resolution: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def build_data_sources() -> pd.DataFrame:
+    """Last-pulled dates + row counts, for the About page. Dates reflect
+    when each source was actually extracted this session (see commit
+    history / extract script output) -- not derived from file mtimes,
+    which would be wrong after a git clone or file copy.
+    """
+    import datetime as dt
+
+    def raw_rows(path):
+        return len(pd.read_csv(path)) if Path(path).exists() else 0
+
+    return pd.DataFrame([
+        {"source": "RateMyProfessors", "last_pulled": dt.date(2026, 10, 7),
+         "raw_rows": raw_rows(CLEAN_DIR / "rmp_professors.csv"), "notes": "professor gist only, no reviews yet"},
+        {"source": "UBC grades (DonneyF/ubc-pair-grade-data)", "last_pulled": dt.date(2026, 10, 7),
+         "raw_rows": raw_rows(CLEAN_DIR / "grade_sections.csv"), "notes": "10 terms, 2021S-2025W"},
+        {"source": "UBC course schedule", "last_pulled": dt.date(2026, 10, 8),
+         "raw_rows": raw_rows(CLEAN_DIR / "upcoming_sections.csv"), "notes": "terms 1453-1454 (2026-27 W1/W2)"},
+        {"source": "SOFI salary PDFs", "last_pulled": dt.date(2026, 10, 7),
+         "raw_rows": raw_rows(CLEAN_DIR / "salaries.csv"), "notes": "FY21-FY25, manual annual upload"},
+    ])
+
+
 def build() -> None:
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -177,6 +228,8 @@ def build() -> None:
     prof_summary = build_prof_summary(prof_master, prof_course_summary)
     upcoming_sections = build_upcoming_sections(resolution)
     salaries = build_salaries(resolution)
+    prof_crosswalk = pd.read_csv(CLEAN_DIR / "prof_crosswalk.csv")
+    data_sources = build_data_sources()
 
     if DB_PATH.exists():
         DB_PATH.unlink()
@@ -187,6 +240,8 @@ def build() -> None:
     con.execute("CREATE TABLE prof_course_summary AS SELECT * FROM prof_course_summary")
     con.execute("CREATE TABLE upcoming_sections AS SELECT * FROM upcoming_sections")
     con.execute("CREATE TABLE salaries AS SELECT * FROM salaries")
+    con.execute("CREATE TABLE prof_crosswalk AS SELECT * FROM prof_crosswalk")
+    con.execute("CREATE TABLE data_sources AS SELECT * FROM data_sources")
     con.close()
 
     print(f"\nbuilt {DB_PATH}")
