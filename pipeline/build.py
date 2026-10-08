@@ -1,0 +1,196 @@
+"""Step 6 (BUILD) — assemble final tables into data/final/ubc.duckdb.
+
+Reviews are excluded for now (holding off on the RMP review pull per the
+user) — no reviews table is built. Everything else from the spec's table
+list is here: course_summary, course_terms, prof_summary,
+prof_course_summary, upcoming_sections, salaries.
+
+Professor identity: per the spec's "Professor master list" decision
+(everyone who has taught or will teach at UBC-V), prof_master is built from
+distinct match_keys in grades+sections only -- not from salaries (most
+salary rows are non-teaching staff) and not from every RMP professor (RMP
+has people from other schools' overlap/noise and people not teaching in our
+term range). prof_id = the RMP legacy_id when matched "exact"/override,
+else a synthetic "local:<match_key>" id so no_rmp professors still get a
+stable identity other tables can join against.
+"""
+
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+
+from pipeline.match import match_key_from_fullname, match_key_from_parts
+
+CLEAN_DIR = Path("data/clean")
+FINAL_DIR = Path("data/final")
+DB_PATH = FINAL_DIR / "ubc.duckdb"
+
+
+def _prof_id(legacy_id, match_key) -> str:
+    if pd.notna(legacy_id):
+        return str(int(legacy_id))
+    return f"local:{match_key}"
+
+
+def build_prof_resolution() -> pd.DataFrame:
+    """match_key -> (prof_id, match_label), resolved once, reused everywhere.
+
+    Scoped to grades + sections only, matching the spec's "professor master
+    list" decision: everyone who has taught or will teach at UBC-V. Salary
+    rows are matched AGAINST this list later, never used to grow it -- most
+    salary rows are non-teaching staff (confirmed: 8649 distinct people
+    exist only in salary data, not grades/sections) and must not get
+    promoted into a synthetic professor identity just because they earn
+    above the SOFI disclosure threshold.
+    """
+    crosswalk = pd.read_csv(CLEAN_DIR / "prof_crosswalk.csv")
+    resolution = (
+        crosswalk[crosswalk["source"].isin(["grades", "sections"])]
+        [["match_key", "legacy_id", "match_label"]]
+        .drop_duplicates(subset="match_key")
+    )
+    resolution["prof_id"] = [
+        _prof_id(lid, mk) for lid, mk in zip(resolution["legacy_id"], resolution["match_key"])
+    ]
+    return resolution[["match_key", "prof_id", "legacy_id", "match_label"]]
+
+
+def build_course_terms(resolution: pd.DataFrame) -> pd.DataFrame:
+    df = pd.read_csv(CLEAN_DIR / "grade_sections.csv")
+    df["match_key"] = df["instructor"].apply(match_key_from_fullname)
+    df = df.merge(resolution, on="match_key", how="left")
+    out = df[[
+        "course_key", "term", "Section", "Title", "instructor", "prof_id",
+        "Reported", "Avg", "Median", "Percentile (25)", "Percentile (75)", "High", "Low",
+        "<50", "50-54", "55-59", "60-63", "64-67", "68-71", "72-75", "76-79", "80-84", "85-89", "90-100",
+    ]].rename(columns={
+        "Section": "section", "Title": "course_title", "Reported": "reported",
+        "Avg": "avg", "Median": "median",
+    })
+
+    print(f"course_terms: {len(out)} rows ({out['prof_id'].notna().sum()} with resolved prof_id)")
+    return out
+
+
+def build_course_summary(course_terms: pd.DataFrame) -> pd.DataFrame:
+    def weighted_avg(g, col):
+        w = g["reported"]
+        return (g[col] * w).sum() / w.sum() if w.sum() > 0 else float("nan")
+
+    rows = []
+    for course_key, g in course_terms.groupby("course_key"):
+        rows.append({
+            "course_key": course_key,
+            "course_title": g["course_title"].mode().iloc[0] if not g["course_title"].mode().empty else None,
+            "overall_avg": weighted_avg(g, "avg"),
+            "num_terms_offered": g["term"].nunique(),
+            "num_sections_total": len(g),
+            "first_term": sorted(g["term"].unique())[0],
+            "last_term": sorted(g["term"].unique())[-1],
+        })
+    out = pd.DataFrame(rows)
+    print(f"course_summary: {len(out)} rows")
+    return out
+
+
+def build_prof_course_summary(course_terms: pd.DataFrame, course_summary: pd.DataFrame) -> pd.DataFrame:
+    course_avg_lookup = course_summary.set_index("course_key")["overall_avg"].to_dict()
+
+    rows = []
+    matched = course_terms.dropna(subset=["prof_id"])
+    for (prof_id, course_key), g in matched.groupby(["prof_id", "course_key"]):
+        w = g["reported"]
+        prof_avg = (g["avg"] * w).sum() / w.sum() if w.sum() > 0 else float("nan")
+        course_avg = course_avg_lookup.get(course_key, float("nan"))
+        rows.append({
+            "prof_id": prof_id,
+            "course_key": course_key,
+            "num_sections": len(g),
+            "total_reported": int(w.sum()),
+            "prof_avg": prof_avg,
+            "course_avg": course_avg,
+            "grade_delta": prof_avg - course_avg if pd.notna(course_avg) else float("nan"),
+        })
+    out = pd.DataFrame(rows)
+    print(f"prof_course_summary: {len(out)} rows")
+    return out
+
+
+def build_prof_master(resolution: pd.DataFrame) -> pd.DataFrame:
+    rmp = pd.read_csv(CLEAN_DIR / "rmp_professors.csv")
+    rmp["match_key"] = [
+        match_key_from_parts(f, l) for f, l in zip(rmp["first_name"], rmp["last_name"])
+    ]
+    rmp["prof_id_rmp"] = rmp["legacy_id"].astype(int).astype(str)
+
+    out = resolution.copy()
+    out = out.merge(
+        rmp[["prof_id_rmp", "first_name", "last_name", "department", "avg_rating",
+             "avg_difficulty", "num_ratings", "would_take_again_percent"]],
+        left_on="prof_id", right_on="prof_id_rmp", how="left",
+    ).drop(columns=["prof_id_rmp"])
+
+    print(f"prof_master: {len(out)} rows ({out['first_name'].notna().sum()} with RMP data attached)")
+    return out
+
+
+def build_prof_summary(prof_master: pd.DataFrame, prof_course_summary: pd.DataFrame) -> pd.DataFrame:
+    overall_delta = {}
+    for prof_id, g in prof_course_summary.dropna(subset=["grade_delta"]).groupby("prof_id"):
+        w = g["total_reported"]
+        overall_delta[prof_id] = (g["grade_delta"] * w).sum() / w.sum() if w.sum() > 0 else float("nan")
+
+    prof_master = prof_master.copy()
+    prof_master["overall_grade_delta"] = prof_master["prof_id"].map(overall_delta)
+    print(f"prof_summary: {len(prof_master)} rows "
+          f"({prof_master['overall_grade_delta'].notna().sum()} with a computed grade delta)")
+    return prof_master
+
+
+def build_upcoming_sections(resolution: pd.DataFrame) -> pd.DataFrame:
+    df = pd.read_csv(CLEAN_DIR / "upcoming_sections.csv")
+    df["match_key"] = df["instructor"].apply(match_key_from_fullname)
+    df = df.merge(resolution[["match_key", "prof_id"]], on="match_key", how="left")
+    print(f"upcoming_sections: {len(df)} rows ({df['prof_id'].notna().sum()} with resolved prof_id)")
+    return df
+
+
+def build_salaries(resolution: pd.DataFrame) -> pd.DataFrame:
+    df = pd.read_csv(CLEAN_DIR / "salaries.csv")
+    df["match_key"] = [
+        match_key_from_parts(f, l) for f, l in zip(df["first_name"], df["last_name"])
+    ]
+    df = df.merge(resolution[["match_key", "prof_id"]], on="match_key", how="left")
+    print(f"salaries: {len(df)} rows ({df['prof_id'].notna().sum()} linked to a professor in the master list)")
+    return df
+
+
+def build() -> None:
+    FINAL_DIR.mkdir(parents=True, exist_ok=True)
+
+    resolution = build_prof_resolution()
+    course_terms = build_course_terms(resolution)
+    course_summary = build_course_summary(course_terms)
+    prof_course_summary = build_prof_course_summary(course_terms, course_summary)
+    prof_master = build_prof_master(resolution)
+    prof_summary = build_prof_summary(prof_master, prof_course_summary)
+    upcoming_sections = build_upcoming_sections(resolution)
+    salaries = build_salaries(resolution)
+
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+    con = duckdb.connect(str(DB_PATH))
+    con.execute("CREATE TABLE course_summary AS SELECT * FROM course_summary")
+    con.execute("CREATE TABLE course_terms AS SELECT * FROM course_terms")
+    con.execute("CREATE TABLE prof_summary AS SELECT * FROM prof_summary")
+    con.execute("CREATE TABLE prof_course_summary AS SELECT * FROM prof_course_summary")
+    con.execute("CREATE TABLE upcoming_sections AS SELECT * FROM upcoming_sections")
+    con.execute("CREATE TABLE salaries AS SELECT * FROM salaries")
+    con.close()
+
+    print(f"\nbuilt {DB_PATH}")
+
+
+if __name__ == "__main__":
+    build()
