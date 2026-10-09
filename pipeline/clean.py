@@ -238,10 +238,67 @@ def clean_rmp_professors(raw_path: str) -> pd.DataFrame:
 
     print(f"rmp professors: {before_dedup} raw rows -> {len(out)} clean rows "
           f"({duped} duplicate-legacy_id rows dropped) -> {out_path}")
-    print("  NOTE: this is professor-gist data only (ratings aggregate). No "
-          "review-level rows exist yet — fetch_a_professor() hasn't been "
-          "called per-professor, so there's no reviews.csv / review text / "
-          "per-review course text to fuzzy-match against yet.")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# RateMyProfessors reviews (per-professor detail pull, extract_rmp_reviews.py)
+# ---------------------------------------------------------------------------
+
+def _review_course_key(raw_class: str) -> str | None:
+    """RMP's free-text course field has no space/campus code: 'MATH100',
+    'BIO213'. Not a real course_key match (that's still unresolved fuzzy
+    matching, deliberately not attempted) -- just a best-effort normalize
+    so an exact match against course_summary.course_key is at least
+    possible for the common case.
+    """
+    if not isinstance(raw_class, str) or not raw_class.strip():
+        return None
+    match = re.match(r"^([A-Za-z]+)[_\s]*(\d.*)$", raw_class.strip())
+    if not match:
+        return None
+    return f"{match.group(1).upper()} {match.group(2).upper()}"
+
+
+def clean_reviews(raw_dir: str) -> pd.DataFrame:
+    files = sorted(Path(raw_dir).glob("*.json"))
+    files = [f for f in files if f.stem != "_errors"]
+    if not files:
+        raise RuntimeError(f"No review files found under {raw_dir}")
+
+    rows = []
+    for f in files:
+        professor = json.loads(f.read_text())
+        legacy_id = professor.get("legacy_id")
+        for rating in professor.get("ratings", []):
+            rows.append({
+                "legacy_id": legacy_id,
+                "raw_class": rating.get("class"),
+                "course_key_guess": _review_course_key(rating.get("class")),
+                "date": rating.get("date"),
+                "comment": rating.get("comment"),
+                "clarity_rating": rating.get("clarityRating"),
+                "difficulty_rating": rating.get("difficultyRating"),
+                "helpful_rating": rating.get("helpfulRating"),
+                "is_online": rating.get("isForOnlineClass"),
+                "is_for_credit": rating.get("isForCredit"),
+                "attendance_mandatory": rating.get("attendanceMandatory"),
+                "flag_status": rating.get("flagStatus"),
+            })
+
+    out = pd.DataFrame(rows)
+    CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+    # Parquet, not CSV -- free-text review comments (embedded newlines,
+    # quotes, unicode) broke the CSV round-trip: pandas wrote 41646 rows but
+    # reading it back disagreed on the row count depending on parser engine,
+    # and the C engine outright crashed with a buffer overflow. Parquet has
+    # no delimiter/escaping ambiguity for this kind of content.
+    out_path = CLEAN_DIR / "reviews.parquet"
+    out.to_parquet(out_path, index=False)
+
+    matched_course = out["course_key_guess"].notna().sum()
+    print(f"reviews: {len(files)} professor files -> {len(out)} review rows "
+          f"({matched_course} with a guessed course_key, {len(out) - matched_course} without) -> {out_path}")
     return out
 
 
@@ -249,6 +306,7 @@ if __name__ == "__main__":
     clean_grades("data/raw/grades/2026-10-08/ubc-pair-grade-data")
     clean_salaries("data/raw/salaries")
     clean_rmp_professors("data/raw/rmp/2026-10-07/professors.json")
+    clean_reviews("data/raw/rmp_reviews/2026-10-08")
 
     # This run's two term files landed in different date folders because the
     # crawl spanned midnight (see extract_sections.py's run_date fix) — a

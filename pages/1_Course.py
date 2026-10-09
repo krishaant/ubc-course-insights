@@ -160,7 +160,16 @@ with tab_profs:
                 st.session_state["selected_prof_id"] = row["prof_id"]
                 st.switch_page("pages/2_Professor.py")
 
+            course_reviews = data.get_prof_reviews(con, row["prof_id"], course_key=selected)
+            if not course_reviews.empty:
+                with st.expander(f"{len(course_reviews)} review(s) for {selected}"):
+                    for _, r in course_reviews.iterrows():
+                        date_str = str(r["date"]).split(" ")[0] if r["date"] else ""
+                        st.markdown(f"_{date_str}_ — {r['comment'] if r['comment'] else '(no comment text)'}")
+                        st.caption(f"Clarity: {r['clarity_rating']} · Difficulty: {r['difficulty_rating']}")
+
 st.caption(
-    "Reviews aren't pulled yet, so clicking into a section/professor here "
-    "doesn't show review text — just the professor's profile page."
+    "Reviews are capped at each professor's 20 most recent on RMP overall "
+    "(a package limitation, not a data gap) — not all 20 are necessarily "
+    "for this specific course."
 )

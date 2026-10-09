@@ -219,6 +219,35 @@ def get_prof_salary(con, prof_id: str) -> pd.DataFrame:
     ).fetchdf()
 
 
+def get_prof_reviews(con, prof_id: str, course_key: str | None = None) -> pd.DataFrame:
+    if course_key:
+        return con.execute(
+            "SELECT * FROM reviews WHERE prof_id = ? AND course_key_guess = ? ORDER BY date DESC",
+            [prof_id, course_key],
+        ).fetchdf()
+    return con.execute(
+        "SELECT * FROM reviews WHERE prof_id = ? ORDER BY date DESC", [prof_id],
+    ).fetchdf()
+
+
+def get_prof_review_courses(con, prof_id: str) -> list[str]:
+    df = con.execute(
+        "SELECT DISTINCT course_key_guess FROM reviews "
+        "WHERE prof_id = ? AND course_key_guess IS NOT NULL ORDER BY course_key_guess",
+        [prof_id],
+    ).fetchdf()
+    return df["course_key_guess"].tolist()
+
+
+def get_course_reviews(con, course_key: str) -> pd.DataFrame:
+    return con.execute(
+        "SELECT r.*, p.first_name, p.last_name FROM reviews r "
+        "JOIN prof_summary p ON r.prof_id = p.prof_id "
+        "WHERE r.course_key_guess = ? ORDER BY r.date DESC",
+        [course_key],
+    ).fetchdf()
+
+
 # ---------------------------------------------------------------------------
 # About page
 # ---------------------------------------------------------------------------

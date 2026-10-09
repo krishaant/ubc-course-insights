@@ -33,8 +33,15 @@ st.dataframe(data.get_match_rate_stats(con), use_container_width=True, hide_inde
 
 st.subheader("Known limitations")
 st.markdown(
-    "- Individual review text isn't pulled yet — only RMP's aggregate "
-    "rating/difficulty per professor.\n"
+    "- Reviews are capped at each professor's **20 most recent** on RMP "
+    "(a hard limit in the package used to pull them, not something we "
+    "chose) — not their full review history. Pulled for 3895 of 4117 "
+    "matched professors (94.6%); the rest failed on a transient network "
+    "issue during the pull and haven't been retried yet.\n"
+    "- A review's course is free text on RMP (e.g. `MATH100`) and is only "
+    "matched to a real course_key by exact normalization, not fuzzy "
+    "matching — about 82% resolve to a real course, the rest show under "
+    "\"course not specified\" on the professor's review list.\n"
     "- \"dept\"-based disambiguation for ambiguous name matches isn't "
     "implemented (needs a subject-code -> RMP-department mapping that "
     "doesn't exist yet) — those cases are labeled `unverified` instead.\n"

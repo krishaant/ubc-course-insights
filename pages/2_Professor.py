@@ -94,4 +94,34 @@ else:
         use_container_width=True, hide_index=True,
     )
 
-st.caption("Review text isn't available yet — not pulled from RMP for this build.")
+st.subheader("Reviews")
+review_courses = data.get_prof_review_courses(con, selected_id)
+if not review_courses:
+    st.write(
+        "No reviews on record — either not matched to RMP, or not included "
+        "in the review pull (capped at the 20 most recent per professor)."
+    )
+else:
+    rcol1, rcol2 = st.columns([2, 1])
+    course_filter = rcol1.selectbox("Filter by course", ["(all courses)"] + review_courses)
+    sort_choice = rcol2.selectbox("Sort by", ["Newest", "Most helpful"])
+
+    reviews_df = data.get_prof_reviews(
+        con, selected_id, course_key=None if course_filter == "(all courses)" else course_filter,
+    )
+    if sort_choice == "Most helpful":
+        reviews_df = reviews_df.sort_values("helpful_rating", ascending=False)
+
+    st.caption(f"{len(reviews_df)} review(s) — capped at this professor's 20 most recent on RMP overall, not per course.")
+    for _, r in reviews_df.iterrows():
+        header = r["raw_class"] or "Course not specified"
+        date_str = str(r["date"]).split(" ")[0] if r["date"] else ""
+        with st.container(border=True):
+            st.markdown(f"**{header}** &nbsp;·&nbsp; {date_str}")
+            st.write(r["comment"] if r["comment"] else "_(no comment text)_")
+            st.caption(
+                f"Clarity: {r['clarity_rating']} · Difficulty: {r['difficulty_rating']} "
+                f"· Helpful votes: {r['helpful_rating']}"
+                + (" · Online" if r["is_online"] else "")
+                + (" · For credit" if r["is_for_credit"] else "")
+            )

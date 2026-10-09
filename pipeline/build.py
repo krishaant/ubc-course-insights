@@ -214,6 +214,18 @@ def build_salaries(resolution: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def build_reviews(prof_summary: pd.DataFrame) -> pd.DataFrame:
+    reviews = pd.read_parquet(CLEAN_DIR / "reviews.parquet")
+    id_lookup = prof_summary[["prof_id", "legacy_id"]].dropna(subset=["legacy_id"])
+    id_lookup = id_lookup.assign(legacy_id=id_lookup["legacy_id"].astype(int))
+
+    out = reviews.merge(id_lookup, on="legacy_id", how="left")
+    unmatched = out["prof_id"].isna().sum()
+    print(f"reviews: {len(out)} rows ({unmatched} with no matching prof_id -- "
+          f"shouldn't normally happen, the pull was scoped to prof_summary's own legacy_ids)")
+    return out
+
+
 def build_data_sources() -> pd.DataFrame:
     """Last-pulled dates + row counts, for the About page. Dates reflect
     when each source was actually extracted this session (see commit
@@ -227,7 +239,10 @@ def build_data_sources() -> pd.DataFrame:
 
     return pd.DataFrame([
         {"source": "RateMyProfessors", "last_pulled": dt.date(2026, 10, 7),
-         "raw_rows": raw_rows(CLEAN_DIR / "rmp_professors.csv"), "notes": "professor gist only, no reviews yet"},
+         "raw_rows": raw_rows(CLEAN_DIR / "rmp_professors.csv"), "notes": "professor gist (ratings aggregate)"},
+        {"source": "RateMyProfessors reviews", "last_pulled": dt.date(2026, 10, 9),
+         "raw_rows": len(pd.read_parquet(CLEAN_DIR / "reviews.parquet")) if (CLEAN_DIR / "reviews.parquet").exists() else 0,
+         "notes": "3895/4117 matched professors (94.6%); capped at each professor's 20 most recent reviews (package limitation)"},
         {"source": "UBC grades (DonneyF/ubc-pair-grade-data)", "last_pulled": dt.date(2026, 10, 8),
          "raw_rows": raw_rows(CLEAN_DIR / "grade_sections.csv"),
          "notes": "1996S-2025W (pair-reports to 2013, tableau v1 2014-2020, tableau v2 2021+)"},
@@ -249,6 +264,7 @@ def build() -> None:
     prof_summary = build_prof_summary(prof_master, prof_course_summary)
     upcoming_sections = build_upcoming_sections(resolution)
     salaries = build_salaries(resolution)
+    reviews = build_reviews(prof_summary)
     prof_crosswalk = pd.read_csv(CLEAN_DIR / "prof_crosswalk.csv")
     data_sources = build_data_sources()
 
@@ -261,6 +277,7 @@ def build() -> None:
     con.execute("CREATE TABLE prof_course_summary AS SELECT * FROM prof_course_summary")
     con.execute("CREATE TABLE upcoming_sections AS SELECT * FROM upcoming_sections")
     con.execute("CREATE TABLE salaries AS SELECT * FROM salaries")
+    con.execute("CREATE TABLE reviews AS SELECT * FROM reviews")
     con.execute("CREATE TABLE prof_crosswalk AS SELECT * FROM prof_crosswalk")
     con.execute("CREATE TABLE data_sources AS SELECT * FROM data_sources")
     con.close()
