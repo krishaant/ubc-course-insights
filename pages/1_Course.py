@@ -23,7 +23,8 @@ selected = st.selectbox(
     index=course_keys.index(default_key) if default_key in course_keys else 0,
 )
 st.session_state["selected_course_key"] = selected
-st.query_params["course_key"] = selected  # shareable/bookmarkable once loaded
+if st.query_params.get("course_key") != selected:
+    st.query_params["course_key"] = selected  # shareable/bookmarkable once loaded
 
 summary = data.get_course_summary(con, selected)
 if summary is None:
@@ -102,13 +103,60 @@ with tab_now:
 
 with tab_history:
     hist_df = data.get_course_history(con, selected)
-    st.dataframe(
-        hist_df[["term", "section", "instructor", "reported", "avg"]].rename(columns={
-            "term": "Term", "section": "Section", "instructor": "Instructor",
-            "reported": "Enrolled", "avg": "Average",
-        }),
-        use_container_width=True, hide_index=True,
+    display_hist = hist_df[["term", "section", "instructor", "reported", "avg"]].rename(columns={
+        "term": "Term", "section": "Section", "instructor": "Instructor",
+        "reported": "Enrolled", "avg": "Average",
+    })
+    st.dataframe(display_hist, use_container_width=True, hide_index=True)
+
+    hist_df = hist_df.reset_index(drop=True)
+    hist_labels = [
+        f"{r['term']} · Section {r['section']}"
+        + (f" · {r['instructor']}" if isinstance(r["instructor"], str) else "")
+        for _, r in hist_df.iterrows()
+    ]
+    picked_label = st.selectbox(
+        "Pick a term/section for the full grade distribution",
+        hist_labels, key="history_picker", index=None,
+        placeholder="Pick a term/section...",
     )
+
+    if picked_label is None:
+        st.caption("Pick a term/section above to see that offering's full grade distribution.")
+    else:
+        row = hist_df.iloc[hist_labels.index(picked_label)]
+        st.divider()
+        st.subheader(f"{selected} · {row['term']} · Section {row['section']}")
+
+        mcols = st.columns(6)
+        mcols[0].metric("Average", fmt(row["avg"]))
+        mcols[1].metric("Median", fmt(row["median"]))
+        mcols[2].metric("25th pct", fmt(row["pct_25"]))
+        mcols[3].metric("75th pct", fmt(row["pct_75"]))
+        mcols[4].metric("High", fmt(row["high"], decimals=0))
+        mcols[5].metric("Low", fmt(row["low"], decimals=0))
+
+        if row["prof_id"] == row["prof_id"]:  # not NaN
+            if st.button(f"View {row['first_name']} {row['last_name']}'s profile", key="history_prof_link"):
+                st.session_state["selected_prof_id"] = row["prof_id"]
+                st.switch_page("pages/2_Professor.py")
+
+        st.markdown("**Grade distribution**")
+        bcol1, bcol2 = st.columns(2)
+        buckets = data.GRADE_BUCKET_COLS
+        half = len(buckets) // 2 + len(buckets) % 2
+        for i, bucket in enumerate(buckets):
+            target = bcol1 if i < half else bcol2
+            count = row[bucket]
+            count_str = str(int(count)) if count == count else "—"
+            target.markdown(
+                f"<div style='display:flex; justify-content:space-between; "
+                f"padding:6px 0; border-bottom:1px solid rgba(128,128,128,0.2);'>"
+                f"<span>{bucket}%</span>"
+                f"<span style='background:#fce4e4; color:#b23b3b; border-radius:12px; "
+                f"padding:2px 10px; font-weight:600;'>{count_str}</span></div>",
+                unsafe_allow_html=True,
+            )
 
 with tab_grades:
     profs_for_overlay = data.get_course_professors(con, selected)

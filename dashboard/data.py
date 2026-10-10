@@ -134,9 +134,14 @@ def get_course_now(con, course_key: str) -> pd.DataFrame:
 
 
 def get_course_history(con, course_key: str) -> pd.DataFrame:
+    cols = ', '.join(f'ct."{c}"' for c in GRADE_BUCKET_COLS)
     return con.execute(
-        "SELECT term, section, instructor, prof_id, reported, avg "
-        "FROM course_terms WHERE course_key = ? ORDER BY term DESC, section",
+        f'SELECT ct.term, ct.section, ct.instructor, ct.prof_id, '
+        f'p.first_name, p.last_name, '
+        f'ct.reported, ct.avg, ct.median, ct."Percentile (25)" AS pct_25, '
+        f'ct."Percentile (75)" AS pct_75, ct."High" AS high, ct."Low" AS low, {cols} '
+        f'FROM course_terms ct LEFT JOIN prof_summary p ON ct.prof_id = p.prof_id '
+        f'WHERE ct.course_key = ? ORDER BY ct.term DESC, ct.section',
         [course_key],
     ).fetchdf()
 

@@ -24,7 +24,8 @@ chosen_display = st.selectbox(
 )
 selected_id = id_by_display[chosen_display]
 st.session_state["selected_prof_id"] = selected_id
-st.query_params["prof_id"] = selected_id  # shareable/bookmarkable once loaded
+if st.query_params.get("prof_id") != selected_id:
+    st.query_params["prof_id"] = selected_id  # shareable/bookmarkable once loaded
 
 summary = data.get_prof_summary(con, selected_id)
 if summary is None:
@@ -82,17 +83,25 @@ courses_df = data.get_prof_courses(con, selected_id)
 if courses_df.empty:
     st.write("No grade history on record for this professor.")
 else:
-    st.dataframe(
-        courses_df[[
-            "course_key", "course_title", "num_sections", "total_reported",
-            "prof_avg", "course_avg", "grade_delta",
-        ]].rename(columns={
-            "course_key": "Course", "course_title": "Title", "num_sections": "Sections",
-            "total_reported": "Students", "prof_avg": "Their avg", "course_avg": "Course avg",
-            "grade_delta": "Delta",
-        }),
-        use_container_width=True, hide_index=True,
+    display_courses = courses_df[[
+        "course_key", "course_title", "num_sections", "total_reported",
+        "prof_avg", "course_avg", "grade_delta",
+    ]].rename(columns={
+        "course_key": "Course", "course_title": "Title", "num_sections": "Sections",
+        "total_reported": "Students", "prof_avg": "Their avg", "course_avg": "Course avg",
+        "grade_delta": "Delta",
+    })
+    st.dataframe(display_courses, use_container_width=True, hide_index=True)
+
+    jump_col1, jump_col2 = st.columns([3, 1])
+    course_options = courses_df["course_key"].tolist()
+    jump_choice = jump_col1.selectbox(
+        "Jump to a course", course_options, key="prof_jump_to_course", label_visibility="collapsed",
+        placeholder="Jump to a course...",
     )
+    if jump_col2.button("Go →", key="prof_jump_go", use_container_width=True):
+        st.session_state["selected_course_key"] = jump_choice
+        st.switch_page("pages/1_Course.py")
 
 st.subheader("Reviews")
 review_courses = data.get_prof_review_courses(con, selected_id)
