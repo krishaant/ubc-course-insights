@@ -2,9 +2,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from dashboard import data
+from dashboard import data, style
 
 st.set_page_config(page_title="Professor — UBC Course Insights", layout="wide")
+style.inject_css()
 
 con = data.connect()
 
@@ -32,15 +33,11 @@ if summary is None:
     st.error("No data for this professor.")
     st.stop()
 
-st.title(f"{summary['first_name'] or ''} {summary['last_name'] or ''}".strip() or chosen_display)
-st.caption(summary["department"] or "Department unknown (no RMP match)")
-
-badge = {
-    "exact": "✓ matched to RMP",
-    "no_rmp": "No RMP page found",
-    "unverified": "⚠ ambiguous match — unverified",
-}.get(summary["match_label"], summary["match_label"])
-st.caption(badge)
+style.render_header(
+    f"{summary['first_name'] or ''} {summary['last_name'] or ''}".strip() or chosen_display,
+    summary["department"] or "Department unknown (no RMP match)",
+)
+st.markdown(style.match_label_badge(summary["match_label"]), unsafe_allow_html=True)
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Rating", f"{summary['avg_rating']:.2f}" if summary["avg_rating"] == summary["avg_rating"] else "—")
@@ -60,12 +57,18 @@ if sections.empty:
 else:
     display = sections.copy()
     display["term_id"] = display["term_id"].map(config.TERM_NAMES).fillna(display["term_id"])
-    st.dataframe(
+    st.caption("Click a row to view that course.")
+    sections_event = st.dataframe(
         display[["course_key", "section_number", "status", "term_id"]].rename(columns={
             "course_key": "Course", "section_number": "Section", "status": "Status", "term_id": "Term",
         }),
         use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="prof_sections_table",
     )
+    sections_sel = sections_event["selection"]["rows"]
+    if sections_sel:
+        st.session_state["selected_course_key"] = sections.iloc[sections_sel[0]]["course_key"]
+        st.switch_page("pages/1_Course.py")
 
 if config.SHOW_INDIVIDUAL_SALARY:
     st.subheader("Salary (SOFI disclosure)")
@@ -91,16 +94,14 @@ else:
         "total_reported": "Students", "prof_avg": "Their avg", "course_avg": "Course avg",
         "grade_delta": "Delta",
     })
-    st.dataframe(display_courses, use_container_width=True, hide_index=True)
-
-    jump_col1, jump_col2 = st.columns([3, 1])
-    course_options = courses_df["course_key"].tolist()
-    jump_choice = jump_col1.selectbox(
-        "Jump to a course", course_options, key="prof_jump_to_course", label_visibility="collapsed",
-        placeholder="Jump to a course...",
+    st.caption("Click a row to view that course.")
+    courses_event = st.dataframe(
+        display_courses, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="prof_courses_table",
     )
-    if jump_col2.button("Go →", key="prof_jump_go", use_container_width=True):
-        st.session_state["selected_course_key"] = jump_choice
+    courses_sel = courses_event["selection"]["rows"]
+    if courses_sel:
+        st.session_state["selected_course_key"] = courses_df.iloc[courses_sel[0]]["course_key"]
         st.switch_page("pages/1_Course.py")
 
 st.subheader("Reviews")

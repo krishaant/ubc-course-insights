@@ -1,12 +1,13 @@
 import streamlit as st
 
-from dashboard import data
+from dashboard import data, style
 
 st.set_page_config(page_title="About — UBC Course Insights", layout="wide")
+style.inject_css()
 
 con = data.connect()
 
-st.title("About this data")
+style.render_header("About this data")
 
 st.subheader("Sources")
 st.dataframe(data.get_data_sources(con), use_container_width=True, hide_index=True)

@@ -151,6 +151,9 @@ GRADE_BUCKET_COLS = [
     "72-75", "76-79", "80-84", "85-89", "90-100",
 ]
 
+# UBC's percentage-to-letter scale, same order as GRADE_BUCKET_COLS.
+GRADE_LETTER_LABELS = ["F", "D", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"]
+
 
 def get_grade_distribution(con, course_key: str, prof_id: str | None = None) -> pd.Series:
     cols = ", ".join(f'SUM("{c}") AS "{c}"' for c in GRADE_BUCKET_COLS)

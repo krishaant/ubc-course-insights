@@ -1,13 +1,15 @@
 import ast
 
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from dashboard import data
+from dashboard import data, style
 
 st.set_page_config(page_title="Course — UBC Course Insights", layout="wide")
+style.inject_css()
 
 con = data.connect()
 
@@ -50,8 +52,7 @@ def format_days(raw) -> str:
     return ", ".join(label.get(d, d) for d in days)
 
 
-st.title(selected)
-st.caption(summary["course_title"] or "")
+style.render_header(selected, summary["course_title"] or "")
 
 def fmt(val, decimals=1):
     return f"{val:.{decimals}f}" if val == val else "—"  # val == val is False for NaN
@@ -70,9 +71,13 @@ if not trend.empty:
     range_choice = st.radio(
         "Chart range", ["Past 5 years", "All years"], horizontal=True, label_visibility="collapsed",
     )
-    # Terms run ~2/year (W + S), so the last 10 is a close enough proxy for
-    # "5 years" -- matches what ubcgrades.com itself shows.
-    chart_df = trend.tail(10) if range_choice == "Past 5 years" else trend
+    if range_choice == "Past 5 years":
+        # Filter by actual calendar year, not term count -- courses aren't
+        # offered every term, so "last 10 terms" can span well over 5 years.
+        trend_year = trend["term"].str[:4].astype(int)
+        chart_df = trend[trend_year >= trend_year.max() - 4]
+    else:
+        chart_df = trend
     fig = px.line(chart_df, x="term", y="avg", markers=True, title="Average grade by term")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -89,7 +94,8 @@ with tab_now:
         display["start"] = display["start_time_sec"].apply(format_time)
         display["end"] = display["end_time_sec"].apply(format_time)
         display["location"] = "See Workday"
-        st.dataframe(
+        st.caption("Click a row to view that instructor's profile.")
+        now_event = st.dataframe(
             display[[
                 "term_id", "section_number", "status", "instructional_method", "days", "start", "end",
                 "location", "instructor", "avg_rating", "num_ratings",
@@ -99,7 +105,14 @@ with tab_now:
                 "instructor": "Instructor", "avg_rating": "Rating", "num_ratings": "# Reviews",
             }),
             use_container_width=True, hide_index=True,
+            on_select="rerun", selection_mode="single-row", key="course_now_table",
         )
+        now_sel = now_event["selection"]["rows"]
+        if now_sel:
+            prof_id = now_df.iloc[now_sel[0]]["prof_id"]
+            if prof_id == prof_id:  # not NaN
+                st.session_state["selected_prof_id"] = prof_id
+                st.switch_page("pages/2_Professor.py")
 
 with tab_history:
     hist_df = data.get_course_history(con, selected)
@@ -107,7 +120,17 @@ with tab_history:
         "term": "Term", "section": "Section", "instructor": "Instructor",
         "reported": "Enrolled", "avg": "Average",
     })
-    st.dataframe(display_hist, use_container_width=True, hide_index=True)
+    st.caption("Click a row to view that instructor's profile.")
+    hist_event = st.dataframe(
+        display_hist, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="course_history_table",
+    )
+    hist_sel = hist_event["selection"]["rows"]
+    if hist_sel:
+        prof_id = hist_df.iloc[hist_sel[0]]["prof_id"]
+        if prof_id == prof_id:  # not NaN
+            st.session_state["selected_prof_id"] = prof_id
+            st.switch_page("pages/2_Professor.py")
 
     hist_df = hist_df.reset_index(drop=True)
     hist_labels = [
@@ -168,15 +191,24 @@ with tab_grades:
     )
     dist_all = data.get_grade_distribution(con, selected)
     fig = go.Figure()
-    fig.add_bar(x=data.GRADE_BUCKET_COLS, y=dist_all.values, name="All instructors")
+    fig.add_bar(x=data.GRADE_LETTER_LABELS, y=dist_all.values, name="All instructors")
     if overlay_name != "(all instructors)":
         row = profs_for_overlay[
             (profs_for_overlay["first_name"] + " " + profs_for_overlay["last_name"]) == overlay_name
         ].iloc[0]
         dist_prof = data.get_grade_distribution(con, selected, prof_id=row["prof_id"])
-        fig.add_bar(x=data.GRADE_BUCKET_COLS, y=dist_prof.values, name=overlay_name)
-    fig.update_layout(title="Grade distribution", barmode="group", xaxis_title="Grade range", yaxis_title="Students")
+        fig.add_bar(x=data.GRADE_LETTER_LABELS, y=dist_prof.values, name=overlay_name)
+    fig.update_layout(title="Grade distribution", barmode="group", xaxis_title="Grade", yaxis_title="Students")
     st.plotly_chart(fig, use_container_width=True)
+
+    total_all = dist_all.sum()
+    grade_table = pd.DataFrame({
+        "Grade": data.GRADE_LETTER_LABELS,
+        "Score range": data.GRADE_BUCKET_COLS,
+        "Students": dist_all.values.astype(int),
+        "% of class": [f"{(c / total_all * 100):.1f}%" if total_all else "—" for c in dist_all.values],
+    })
+    st.dataframe(grade_table, use_container_width=True, hide_index=True)
 
 with tab_profs:
     profs_df = data.get_course_professors(con, selected)
@@ -202,8 +234,10 @@ with tab_profs:
             cols[1].write(f"Rating: {row['avg_rating']:.2f}" if row["avg_rating"] == row["avg_rating"] else "No rating")
             cols[2].write(f"Difficulty: {row['avg_difficulty']:.2f}" if row["avg_difficulty"] == row["avg_difficulty"] else "—")
             cols[3].write(f"Grade Δ: {row['grade_delta']:+.1f}" if row["grade_delta"] == row["grade_delta"] else "—")
-            badge = {"exact": "✓ matched", "no_rmp": "no RMP page", "unverified": "⚠ unverified match"}.get(row["match_label"], row["match_label"])
-            cols[4].caption(badge + (" · low data" if row["low_data"] else ""))
+            badge_html = style.match_label_badge(row["match_label"])
+            if row["low_data"]:
+                badge_html += " <span style='color:#8A6100; font-size:0.78rem;'>· low data</span>"
+            cols[4].markdown(badge_html, unsafe_allow_html=True)
             if cols[5].button("View profile", key=f"prof_link_{row['prof_id']}"):
                 st.session_state["selected_prof_id"] = row["prof_id"]
                 st.switch_page("pages/2_Professor.py")

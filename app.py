@@ -1,13 +1,14 @@
 import streamlit as st
 
-from dashboard import data
+from dashboard import data, style
 
 st.set_page_config(page_title="UBC Course Insights", layout="wide")
+style.inject_css()
 
-st.title("UBC Course Insights")
-st.caption(
+style.render_header(
+    "UBC Course Insights",
     "Who teaches each course, how students rate them, how their grades "
-    "compare to the course average, and what they're paid."
+    "compare to the course average, and what they're paid.",
 )
 
 con = data.connect()
@@ -49,4 +50,4 @@ else:
         st.dataframe(data.list_all_professors(con), use_container_width=True, hide_index=True)
 
 st.divider()
-st.page_link("pages/3_About.py", label="About this data", icon="ℹ️")
+st.page_link("pages/3_About.py", label="About this data")
