@@ -17,25 +17,25 @@ to the course average, and what they're paid.**
 ---
 
 ## What it does
+When I am registering for classes I usually have Workday, RateMyProf, A calendar, and UBCGrades open at the same time. 
 
-A single place to answer the question every UBC student actually has before
-registering: **is this course/professor worth it?**
+A single place to answer the question every UBC student actually has before registering: **is this course/professor worth it?**
 
 - **Search** any course or professor by name — typo-tolerant.
-- **Course pages** — grade trend over time (1996–2025), max/min section
+- **Course pages**, grade trend over time (1996–2025), max/min section
   averages, who's teaching it now, full term-by-term history with
   drill-down grade distributions by UBC letter grade, every professor
   who's taught it ranked by rating or grade leniency.
-- **Professor pages** — RMP rating & difficulty, salary history (SOFI
+- **Professor pages**, RMP rating & difficulty, salary history (SOFI
   public disclosures), every course they teach with their grade delta vs.
   the course average, and their actual reviews — filterable by course.
-- **About page** — exactly where every number comes from, with honest
+- **About page**, exactly where every number comes from, with honest
   caveats, not a results dashboard that hides its own gaps.
 
 ## Architecture
 
 Five scripts, run by hand, each handing a clean artifact to the next.
-Nothing in the Streamlit app ever calls a live source — it only ever reads
+Nothing in the Streamlit app ever calls a live source, it only ever reads
 the one database the pipeline built.
 
 ![Pipeline diagram: four sources (RateMyProfessor, UBCGrades, UBC Course Schedule, UBC Financial Statements) feed extract scripts, which flow through clean.py, match.py and build.py into nine DuckDB tables, stored in data/final/ubc.duckdb, served by dashboard/data.py to four Streamlit pages, and deployed via GitHub to Streamlit Cloud.](docs/architecture.png)
