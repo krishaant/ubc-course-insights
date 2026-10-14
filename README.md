@@ -6,6 +6,7 @@
 to the course average, and what they're paid.**
 
 [![Python](https://img.shields.io/badge/Python-3.12-0055B7?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![SQL](https://img.shields.io/badge/SQL-002145?style=flat-square&logo=postgresql&logoColor=white)](#)
 [![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![DuckDB](https://img.shields.io/badge/DuckDB-analytics-FFD600?style=flat-square&logo=duckdb&logoColor=002145)](https://duckdb.org/)
 [![License](https://img.shields.io/badge/license-private-002145?style=flat-square)](#)
