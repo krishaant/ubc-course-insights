@@ -160,7 +160,7 @@ with tab_history:
         mcols[5].metric("Low", fmt(row["low"], decimals=0))
 
         if row["prof_id"] == row["prof_id"]:  # not NaN
-            if st.button(f"View {row['first_name']} {row['last_name']}'s profile", key="history_prof_link"):
+            if st.button(f"View {row['first_name']} {row['last_name']}'s profile", key="history_prof_link", type="primary"):
                 st.session_state["selected_prof_id"] = row["prof_id"]
                 st.switch_page("pages/2_Professor.py")
 
@@ -229,26 +229,27 @@ with tab_profs:
         display = profs_df.copy()
         display["low_data"] = display["num_ratings"].fillna(0) < 5
         for _, row in display.iterrows():
-            cols = st.columns([3, 2, 2, 2, 2, 2])
-            cols[0].write(f"**{row['first_name']} {row['last_name']}**")
-            cols[1].write(f"Rating: {row['avg_rating']:.2f}" if row["avg_rating"] == row["avg_rating"] else "No rating")
-            cols[2].write(f"Difficulty: {row['avg_difficulty']:.2f}" if row["avg_difficulty"] == row["avg_difficulty"] else "—")
-            cols[3].write(f"Grade Δ: {row['grade_delta']:+.1f}" if row["grade_delta"] == row["grade_delta"] else "—")
-            badge_html = style.match_label_badge(row["match_label"])
-            if row["low_data"]:
-                badge_html += " <span style='color:#8A6100; font-size:0.78rem;'>· low data</span>"
-            cols[4].markdown(badge_html, unsafe_allow_html=True)
-            if cols[5].button("View profile", key=f"prof_link_{row['prof_id']}"):
-                st.session_state["selected_prof_id"] = row["prof_id"]
-                st.switch_page("pages/2_Professor.py")
+            with st.container(border=True):
+                cols = st.columns([3, 2, 2, 2, 2])
+                if cols[0].button(
+                    f"{row['first_name']} {row['last_name']}",
+                    key=f"prof_link_{row['prof_id']}",
+                ):
+                    st.session_state["selected_prof_id"] = row["prof_id"]
+                    st.switch_page("pages/2_Professor.py")
+                cols[1].write(f"Rating: {row['avg_rating']:.2f}" if row["avg_rating"] == row["avg_rating"] else "No rating")
+                cols[2].write(f"Difficulty: {row['avg_difficulty']:.2f}" if row["avg_difficulty"] == row["avg_difficulty"] else "—")
+                cols[3].write(f"Grade Δ: {row['grade_delta']:+.1f}" if row["grade_delta"] == row["grade_delta"] else "—")
+                badge_html = style.match_label_badge(row["match_label"])
+                if row["low_data"]:
+                    badge_html += " <span style='color:#8A6100; font-size:0.78rem;'>· low data</span>"
+                cols[4].markdown(badge_html, unsafe_allow_html=True)
 
-            course_reviews = data.get_prof_reviews(con, row["prof_id"], course_key=selected)
-            if not course_reviews.empty:
-                with st.expander(f"{len(course_reviews)} review(s) for {selected}"):
-                    for _, r in course_reviews.iterrows():
-                        date_str = str(r["date"]).split(" ")[0] if r["date"] else ""
-                        st.markdown(f"_{date_str}_ — {r['comment'] if r['comment'] else '(no comment text)'}")
-                        st.caption(f"Clarity: {r['clarity_rating']} · Difficulty: {r['difficulty_rating']}")
+                course_reviews = data.get_prof_reviews(con, row["prof_id"], course_key=selected)
+                if not course_reviews.empty:
+                    with st.expander(f"{len(course_reviews)} review(s) for {selected}"):
+                        for _, r in course_reviews.iterrows():
+                            st.markdown(style.render_review_card(r, show_course=False), unsafe_allow_html=True)
 
 st.caption(
     "Reviews are capped at each professor's 20 most recent on RMP overall "

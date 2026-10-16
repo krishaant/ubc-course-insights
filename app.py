@@ -27,7 +27,7 @@ if query:
         else:
             for _, row in results["courses"].iterrows():
                 label = f"{row['course_key']} — {row['course_title'] or ''}"
-                if st.button(label, key=f"course_{row['course_key']}", use_container_width=True):
+                if st.button(label, key=f"course_{row['course_key']}", use_container_width=True, type="primary"):
                     st.session_state["selected_course_key"] = row["course_key"]
                     st.switch_page("pages/1_Course.py")
 
@@ -39,7 +39,7 @@ if query:
             for _, row in results["professors"].iterrows():
                 dept = f" ({row['department']})" if row["department"] else ""
                 label = f"{row['first_name']} {row['last_name']}{dept}"
-                if st.button(label, key=f"prof_{row['prof_id']}", use_container_width=True):
+                if st.button(label, key=f"prof_{row['prof_id']}", use_container_width=True, type="primary"):
                     st.session_state["selected_prof_id"] = row["prof_id"]
                     st.switch_page("pages/2_Professor.py")
 else:
@@ -50,4 +50,6 @@ else:
         st.dataframe(data.list_all_professors(con), use_container_width=True, hide_index=True)
 
 st.divider()
-st.page_link("pages/3_About.py", label="About this data")
+link_cols = st.columns(2)
+link_cols[0].page_link("pages/4_Schedule.py", label="Build your schedule")
+link_cols[1].page_link("pages/3_About.py", label="About this data")

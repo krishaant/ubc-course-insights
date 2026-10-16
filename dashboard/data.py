@@ -257,6 +257,29 @@ def get_course_reviews(con, course_key: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Schedule page
+# ---------------------------------------------------------------------------
+
+def list_terms(con) -> list[int]:
+    df = con.execute("SELECT DISTINCT term_id FROM upcoming_sections ORDER BY term_id").fetchdf()
+    return df["term_id"].tolist()
+
+
+def get_sections_for_term(con, term_id: int, query: str | None = None) -> pd.DataFrame:
+    sql = (
+        "SELECT s.*, p.avg_rating, p.avg_difficulty, p.num_ratings "
+        "FROM upcoming_sections s LEFT JOIN prof_summary p ON s.prof_id = p.prof_id "
+        "WHERE s.term_id = ?"
+    )
+    params = [term_id]
+    if query:
+        sql += " AND (s.course_key ILIKE ? OR s.course_title ILIKE ? OR s.instructor ILIKE ?)"
+        params += [f"%{query}%"] * 3
+    sql += " ORDER BY s.course_key, s.section_number"
+    return con.execute(sql, params).fetchdf()
+
+
+# ---------------------------------------------------------------------------
 # About page
 # ---------------------------------------------------------------------------
 

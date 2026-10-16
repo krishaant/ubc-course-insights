@@ -124,14 +124,4 @@ else:
 
     st.caption(f"{len(reviews_df)} review(s) — capped at this professor's 20 most recent on RMP overall, not per course.")
     for _, r in reviews_df.iterrows():
-        header = r["raw_class"] or "Course not specified"
-        date_str = str(r["date"]).split(" ")[0] if r["date"] else ""
-        with st.container(border=True):
-            st.markdown(f"**{header}** &nbsp;·&nbsp; {date_str}")
-            st.write(r["comment"] if r["comment"] else "_(no comment text)_")
-            st.caption(
-                f"Clarity: {r['clarity_rating']} · Difficulty: {r['difficulty_rating']} "
-                f"· Helpful votes: {r['helpful_rating']}"
-                + (" · Online" if r["is_online"] else "")
-                + (" · For credit" if r["is_for_credit"] else "")
-            )
+        st.markdown(style.render_review_card(r, show_course=True), unsafe_allow_html=True)
